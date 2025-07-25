@@ -96,12 +96,29 @@ class Case7HttpServer {
   }
 
   private setupRoutes(): void {
-    // MCP endpoint for Streamable HTTP transport (Context7 style - no auth)
-    this.app.post('/mcp', async (req, res) => {
+    // MCP endpoint for Streamable HTTP transport
+    this.app.post('/mcp', (req, res, next) => {
+      // Client registration check via headers
+      const clientId = req.headers['x-client-id'] as string;
+      const sessionId = req.headers['mcp-session-id'] as string;
+      
+      // Allow all clients but log registration attempts
+      if (clientId) {
+        logger.info(`Client attempting connection: ${clientId}`);
+      }
+      
+      next();
+    }, async (req, res) => {
       try {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
-          requireClientRegistration: false // Context7 strategy: no client registration
+          onsessioninitialized: (sessionId: string) => {
+            logger.info(`Client registered with session: ${sessionId}`);
+            // Client registration logic can be added here
+          },
+          onsessionclosed: (sessionId: string) => {
+            logger.info(`Client session closed: ${sessionId}`);
+          }
         });
 
         await transport.handleRequest(req, res, this.server);

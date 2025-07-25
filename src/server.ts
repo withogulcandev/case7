@@ -24,7 +24,7 @@ class Case7HttpServer {
     this.app = express();
     this.server = new Server(
       {
-        name: 'case7-http',
+        name: 'case7',
         version: '1.0.0'
       },
       {
@@ -45,7 +45,7 @@ class Case7HttpServer {
 
   private setupMiddleware(): void {
     this.app.use(cors({
-      origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+      origin: ['http://localhost:3000', 'https://mcp.case7.dev'],
       credentials: true
     }));
     this.app.use(express.json());
@@ -112,8 +112,8 @@ class Case7HttpServer {
 
     // Health check endpoint
     this.app.get('/health', (req, res) => {
-      res.json({ 
-        status: 'ok', 
+      res.json({
+        status: 'ok',
         timestamp: new Date().toISOString(),
         transport: 'streamable-http'
       });

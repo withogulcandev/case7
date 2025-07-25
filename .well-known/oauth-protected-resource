@@ -1,0 +1,6 @@
+{
+  "resource": "https://mcp.case7.dev/mcp",
+  "authorization_servers": ["https://mcp.case7.dev"],
+  "scopes_supported": ["mcp"],
+  "bearer_methods_supported": ["header"]
+}

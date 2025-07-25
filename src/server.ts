@@ -128,6 +128,27 @@ class Case7HttpServer {
       }
     });
 
+    // Client registration endpoint
+    this.app.post('/register', (req, res) => {
+      const { client_id, client_name, redirect_uri } = req.body;
+      
+      logger.info(`Client registration attempt: ${client_id || 'anonymous'}`);
+      
+      // For now, accept all registrations
+      res.json({
+        client_id: client_id || randomUUID(),
+        client_secret: randomUUID(),
+        registration_access_token: randomUUID(),
+        registration_client_uri: `${req.protocol}://${req.get('host')}/client/${client_id}`,
+        client_id_issued_at: Math.floor(Date.now() / 1000),
+        client_secret_expires_at: 0,
+        redirect_uris: redirect_uri ? [redirect_uri] : []
+      });
+    });
+
+    // Serve well-known files statically
+    this.app.use('/.well-known', express.static('.well-known'));
+
     // Health check endpoint
     this.app.get('/health', (req, res) => {
       res.json({
@@ -145,6 +166,7 @@ class Case7HttpServer {
         transport: 'streamable-http',
         endpoints: {
           mcp: '/mcp',
+          register: '/register',
           health: '/health',
           info: '/info'
         },

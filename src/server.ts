@@ -4,6 +4,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -13,12 +14,31 @@ import { SearchService } from './services/search-service.js';
 import { SearchCasesSchema, GetCaseSchema } from './types/case.js';
 import { logger } from './utils/logger.js';
 
+interface OAuthClient {
+  client_id: string;
+  client_secret: string;
+  redirect_uris: string[];
+  created_at: number;
+}
+
+interface OAuthToken {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  scope: string;
+  client_id: string;
+  created_at: number;
+}
+
 class Case7HttpServer {
   private app: express.Application;
   private server: Server;
   private caseLoader: CaseLoader;
   private vectorService: VectorService;
   private searchService: SearchService;
+  private clients: Map<string, OAuthClient> = new Map();
+  private tokens: Map<string, OAuthToken> = new Map();
+  private authCodes: Map<string, { client_id: string; code_challenge?: string; redirect_uri: string; expires_at: number }> = new Map();
 
   constructor() {
     this.app = express();
@@ -95,9 +115,171 @@ class Case7HttpServer {
     });
   }
 
+  private validateBearerToken(req: express.Request): OAuthToken | null {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return null;
+    }
+    
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    const oauthToken = this.tokens.get(token);
+    
+    if (!oauthToken || Date.now() > oauthToken.created_at + (oauthToken.expires_in * 1000)) {
+      return null;
+    }
+    
+    return oauthToken;
+  }
+
   private setupRoutes(): void {
-    // MCP endpoint for Streamable HTTP transport
-    this.app.post('/mcp', async (req, res) => {
+    // Client registration endpoint
+    this.app.post('/register', (req, res) => {
+      const { client_name, redirect_uris } = req.body;
+      
+      const client_id = randomUUID();
+      const client_secret = randomUUID();
+      
+      const client: OAuthClient = {
+        client_id,
+        client_secret,
+        redirect_uris: redirect_uris || [],
+        created_at: Date.now()
+      };
+      
+      this.clients.set(client_id, client);
+      
+      logger.info(`Client registered: ${client_id}`);
+      
+      res.json({
+        client_id,
+        client_secret,
+        registration_access_token: randomUUID(),
+        registration_client_uri: `${req.protocol}://${req.get('host')}/client/${client_id}`,
+        client_id_issued_at: Math.floor(Date.now() / 1000),
+        client_secret_expires_at: 0,
+        redirect_uris: client.redirect_uris
+      });
+    });
+
+    // OAuth authorization endpoint
+    this.app.get('/oauth/authorize', (req, res) => {
+      const { client_id, redirect_uri, response_type, scope, code_challenge, code_challenge_method, state } = req.query;
+      
+      if (response_type !== 'code') {
+        return res.status(400).json({ error: 'unsupported_response_type' });
+      }
+      
+      const client = this.clients.get(client_id as string);
+      if (!client) {
+        return res.status(400).json({ error: 'invalid_client' });
+      }
+      
+      if (redirect_uri && !client.redirect_uris.includes(redirect_uri as string)) {
+        return res.status(400).json({ error: 'invalid_redirect_uri' });
+      }
+      
+      const code = randomUUID();
+      this.authCodes.set(code, {
+        client_id: client_id as string,
+        code_challenge: code_challenge as string,
+        redirect_uri: redirect_uri as string,
+        expires_at: Date.now() + 600000 // 10 minutes
+      });
+      
+      logger.info(`Authorization code generated for client: ${client_id}`);
+      
+      const redirectUrl = new URL(redirect_uri as string);
+      redirectUrl.searchParams.set('code', code);
+      if (state) redirectUrl.searchParams.set('state', state as string);
+      
+      return res.redirect(redirectUrl.toString());
+    });
+
+    // OAuth token endpoint
+    this.app.post('/oauth/token', (req, res) => {
+      const { grant_type, client_id, client_secret, code, code_verifier, redirect_uri } = req.body;
+      
+      if (grant_type === 'authorization_code') {
+        const authCode = this.authCodes.get(code);
+        if (!authCode || Date.now() > authCode.expires_at) {
+          return res.status(400).json({ error: 'invalid_grant' });
+        }
+        
+        const client = this.clients.get(client_id);
+        if (!client || client.client_secret !== client_secret) {
+          return res.status(400).json({ error: 'invalid_client' });
+        }
+        
+        if (authCode.code_challenge && code_verifier) {
+          const challenge = createHash('sha256').update(code_verifier).digest('base64url');
+          if (challenge !== authCode.code_challenge) {
+            return res.status(400).json({ error: 'invalid_grant' });
+          }
+        }
+        
+        this.authCodes.delete(code);
+        
+        const access_token = randomUUID();
+        const token: OAuthToken = {
+          access_token,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          scope: 'mcp',
+          client_id,
+          created_at: Date.now()
+        };
+        
+        this.tokens.set(access_token, token);
+        
+        logger.info(`Access token issued for client: ${client_id}`);
+        
+        return res.json({
+          access_token,
+          token_type: token.token_type,
+          expires_in: token.expires_in,
+          scope: token.scope
+        });
+      } else if (grant_type === 'client_credentials') {
+        const client = this.clients.get(client_id);
+        if (!client || client.client_secret !== client_secret) {
+          return res.status(400).json({ error: 'invalid_client' });
+        }
+        
+        const access_token = randomUUID();
+        const token: OAuthToken = {
+          access_token,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          scope: 'mcp',
+          client_id,
+          created_at: Date.now()
+        };
+        
+        this.tokens.set(access_token, token);
+        
+        logger.info(`Client credentials token issued for: ${client_id}`);
+        
+        return res.json({
+          access_token,
+          token_type: token.token_type,
+          expires_in: token.expires_in,
+          scope: token.scope
+        });
+      } else {
+        return res.status(400).json({ error: 'unsupported_grant_type' });
+      }
+    });
+
+    // MCP endpoint for Streamable HTTP transport (now with auth)
+    this.app.post('/mcp', (req, res, next) => {
+      const token = this.validateBearerToken(req);
+      if (!token) {
+        return res.status(401).json({ error: 'invalid_token' });
+      }
+      
+      logger.info(`MCP request from client: ${token.client_id}`);
+      next();
+    }, async (req, res) => {
       try {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
@@ -136,6 +318,9 @@ class Case7HttpServer {
         transport: 'streamable-http',
         endpoints: {
           mcp: '/mcp',
+          register: '/register',
+          authorize: '/oauth/authorize',
+          token: '/oauth/token',
           health: '/health',
           info: '/info'
         },
@@ -258,8 +443,11 @@ class Case7HttpServer {
   async start(port = 8080) {
     await this.initialize();
     
-    this.app.listen(port, '0.0.0.0', () => {
-      console.log(`Server running on http://0.0.0.0:${port}`);
+    return new Promise<void>((resolve) => {
+      this.app.listen(port, '0.0.0.0', () => {
+        console.log(`Server running on http://0.0.0.0:${port}`);
+        resolve();
+      });
     });
   }
 }

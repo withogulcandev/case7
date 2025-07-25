@@ -4,7 +4,6 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { randomUUID } from 'node:crypto';
-import { createHash } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -38,7 +37,6 @@ class Case7HttpServer {
   private searchService: SearchService;
   private clients: Map<string, OAuthClient> = new Map();
   private tokens: Map<string, OAuthToken> = new Map();
-  private authCodes: Map<string, { client_id: string; code_challenge?: string; redirect_uri: string; expires_at: number }> = new Map();
 
   constructor() {
     this.app = express();
@@ -83,6 +81,11 @@ class Case7HttpServer {
           name: 'get-case',
           description: 'Retrieve a specific case by ID with optional section filtering',
           inputSchema: GetCaseSchema
+        },
+        {
+          name: 'register-session',
+          description: 'Register a new OAuth client and get access token for MCP session',
+          inputSchema: { type: 'object', properties: {}, required: [] }
         }
       ]
     }));
@@ -97,6 +100,9 @@ class Case7HttpServer {
 
           case 'get-case':
             return await this.handleGetCase(GetCaseSchema.parse(args));
+
+          case 'register-session':
+            return await this.handleRegisterSession();
 
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -159,92 +165,44 @@ class Case7HttpServer {
       });
     });
 
-    this.app.get('/oauth/authorize', (req, res) => {
-      const { client_id, redirect_uri, response_type, code_challenge, state } = req.query;
-      
-      if (response_type !== 'code') {
-        return res.status(400).json({ error: 'unsupported_response_type' });
-      }
-      
-      const client = this.clients.get(client_id as string);
-      if (!client) {
-        return res.status(400).json({ error: 'invalid_client' });
-      }
-      
-      if (redirect_uri && !client.redirect_uris.includes(redirect_uri as string)) {
-        return res.status(400).json({ error: 'invalid_redirect_uri' });
-      }
-      
-      const code = randomUUID();
-      this.authCodes.set(code, {
-        client_id: client_id as string,
-        code_challenge: code_challenge as string,
-        redirect_uri: redirect_uri as string,
-        expires_at: Date.now() + 600000 // 10 minutes
-      });
-      
-      logger.info(`Authorization code generated for client: ${client_id}`);
-      
-      const redirectUrl = new URL(redirect_uri as string);
-      redirectUrl.searchParams.set('code', code);
-      if (state) redirectUrl.searchParams.set('state', state as string);
-      
-      return res.redirect(redirectUrl.toString());
-    });
 
     this.app.post('/oauth/token', (req, res) => {
+      logger.info('Token request received', { 
+        headers: req.headers, 
+        body: req.body,
+        contentType: req.get('Content-Type')
+      });
+
       if (!req.body) {
+        logger.error('Token request missing body');
         return res.status(400).json({ 
           error: 'invalid_request', 
           error_description: 'Request body is required' 
         });
       }
 
-      const { grant_type, client_id, client_secret, code, code_verifier, redirect_uri } = req.body;
+      const { grant_type, client_id, client_secret } = req.body;
       
-      if (grant_type === 'authorization_code') {
-        const authCode = this.authCodes.get(code);
-        if (!authCode || Date.now() > authCode.expires_at) {
-          return res.status(400).json({ error: 'invalid_grant' });
-        }
-        
-        const client = this.clients.get(client_id);
-        if (!client || client.client_secret !== client_secret) {
-          return res.status(400).json({ error: 'invalid_client' });
-        }
-        
-        if (authCode.code_challenge && code_verifier) {
-          const challenge = createHash('sha256').update(code_verifier).digest('base64url');
-          if (challenge !== authCode.code_challenge) {
-            return res.status(400).json({ error: 'invalid_grant' });
-          }
-        }
-        
-        this.authCodes.delete(code);
-        
-        const access_token = randomUUID();
-        const token: OAuthToken = {
-          access_token,
-          token_type: 'Bearer',
-          expires_in: 3600,
-          scope: 'mcp',
-          client_id,
-          created_at: Date.now()
-        };
-        
-        this.tokens.set(access_token, token);
-        
-        logger.info(`Access token issued for client: ${client_id}`);
-        
-        return res.json({
-          access_token,
-          token_type: token.token_type,
-          expires_in: token.expires_in,
-          scope: token.scope
+      if (!grant_type) {
+        logger.error('Missing grant_type parameter');
+        return res.status(400).json({ 
+          error: 'invalid_request', 
+          error_description: 'grant_type parameter is required' 
         });
-      } else if (grant_type === 'client_credentials') {
+      }
+
+      if (grant_type === 'client_credentials') {
+        if (!client_id || !client_secret) {
+          logger.error('Missing client credentials', { client_id: !!client_id, client_secret: !!client_secret });
+          return res.status(400).json({ 
+            error: 'invalid_request', 
+            error_description: 'client_id and client_secret are required for client_credentials grant' 
+          });
+        }
+
         const client = this.clients.get(client_id);
         if (!client || client.client_secret !== client_secret) {
+          logger.error('Invalid client credentials', { client_id, client_exists: !!client });
           return res.status(400).json({ error: 'invalid_client' });
         }
         
@@ -269,7 +227,11 @@ class Case7HttpServer {
           scope: token.scope
         });
       } else {
-        return res.status(400).json({ error: 'unsupported_grant_type' });
+        logger.error('Unsupported grant type', { grant_type });
+        return res.status(400).json({ 
+          error: 'unsupported_grant_type',
+          error_description: 'Only client_credentials grant type is supported'
+        });
       }
     });
 
@@ -319,14 +281,19 @@ class Case7HttpServer {
         endpoints: {
           mcp: '/mcp',
           register: '/register',
-          authorize: '/oauth/authorize',
           token: '/oauth/token',
           health: '/health',
           info: '/info'
         },
+        oauth: {
+          grant_types_supported: ['client_credentials'],
+          token_endpoint: '/oauth/token',
+          client_registration_endpoint: '/register'
+        },
         tools: [
           { name: 'search-cases', description: 'Search for development cases' },
-          { name: 'get-case', description: 'Get specific case by ID' }
+          { name: 'get-case', description: 'Get specific case by ID' },
+          { name: 'register-session', description: 'Register MCP session and get access token' }
         ]
       });
     });
@@ -403,6 +370,61 @@ class Case7HttpServer {
         text: JSON.stringify(response, null, 2)
       }]
     };
+  }
+
+  private async handleRegisterSession() {
+    try {
+      // Create a new OAuth client automatically
+      const client_id = randomUUID();
+      const client_secret = randomUUID();
+      
+      const client: OAuthClient = {
+        client_id,
+        client_secret,
+        redirect_uris: [],
+        created_at: Date.now()
+      };
+      
+      this.clients.set(client_id, client);
+      logger.info(`MCP session client registered: ${client_id}`);
+
+      // Immediately create an access token using client_credentials flow
+      const access_token = randomUUID();
+      const token: OAuthToken = {
+        access_token,
+        token_type: 'Bearer',
+        expires_in: 3600,
+        scope: 'mcp',
+        client_id,
+        created_at: Date.now()
+      };
+      
+      this.tokens.set(access_token, token);
+      logger.info(`Access token created for MCP session: ${access_token}`);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            client_id,
+            client_secret,
+            access_token,
+            token_type: 'Bearer',
+            expires_in: 3600,
+            scope: 'mcp'
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      logger.error('Failed to register MCP session:', error);
+      return {
+        content: [{
+          type: 'text',
+          text: `Error registering session: ${error instanceof Error ? error.message : 'Unknown error'}`
+        }],
+        isError: true
+      };
+    }
   }
 
   private filterCaseSections(content: string, sections: string[]): string {

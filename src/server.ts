@@ -69,7 +69,6 @@ class Case7HttpServer {
       credentials: true
     }));
     this.app.use(express.json());
-    this.app.use(express.raw({ type: 'application/json' }));
   }
 
   private setupMcpHandlers(): void {
@@ -132,9 +131,8 @@ class Case7HttpServer {
   }
 
   private setupRoutes(): void {
-    // Client registration endpoint
     this.app.post('/register', (req, res) => {
-      const { client_name, redirect_uris } = req.body;
+      const { redirect_uris } = req.body;
       
       const client_id = randomUUID();
       const client_secret = randomUUID();
@@ -161,9 +159,8 @@ class Case7HttpServer {
       });
     });
 
-    // OAuth authorization endpoint
     this.app.get('/oauth/authorize', (req, res) => {
-      const { client_id, redirect_uri, response_type, scope, code_challenge, code_challenge_method, state } = req.query;
+      const { client_id, redirect_uri, response_type, code_challenge, state } = req.query;
       
       if (response_type !== 'code') {
         return res.status(400).json({ error: 'unsupported_response_type' });
@@ -195,7 +192,6 @@ class Case7HttpServer {
       return res.redirect(redirectUrl.toString());
     });
 
-    // OAuth token endpoint
     this.app.post('/oauth/token', (req, res) => {
       const { grant_type, client_id, client_secret, code, code_verifier, redirect_uri } = req.body;
       
@@ -270,7 +266,6 @@ class Case7HttpServer {
       }
     });
 
-    // MCP endpoint for Streamable HTTP transport (now with auth)
     this.app.post('/mcp', (req, res, next) => {
       const token = this.validateBearerToken(req);
       if (!token) {
@@ -278,7 +273,7 @@ class Case7HttpServer {
       }
       
       logger.info(`MCP request from client: ${token.client_id}`);
-      next();
+      return next();
     }, async (req, res) => {
       try {
         const transport = new StreamableHTTPServerTransport({
@@ -298,10 +293,9 @@ class Case7HttpServer {
       }
     });
 
-    // Serve well-known files statically
     this.app.use('/.well-known', express.static('.well-known'));
 
-    // Health check endpoint
+
     this.app.get('/health', (req, res) => {
       res.json({
         status: 'ok',
@@ -310,7 +304,6 @@ class Case7HttpServer {
       });
     });
 
-    // Info endpoint
     this.app.get('/info', (req, res) => {
       res.json({
         name: 'case7-http',

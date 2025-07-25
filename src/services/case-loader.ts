@@ -1,5 +1,5 @@
-import fs from 'fs/promises';
-import path from 'path';
+import { readdir, readFile } from 'fs/promises';
+import { resolve, join, sep } from 'path';
 import matter from 'gray-matter';
 import { Case, CaseFrontmatter, CaseFrontmatterSchema } from '../types/case.js';
 import { logger } from '../utils/logger.js';
@@ -9,7 +9,7 @@ export class CaseLoader {
   private readonly casesDir: string;
 
   constructor(casesDir: string = './cases') {
-    this.casesDir = path.resolve(casesDir);
+    this.casesDir = resolve(casesDir);
   }
 
   async loadAllCases(): Promise<Case[]> {
@@ -26,10 +26,10 @@ export class CaseLoader {
 
   private async loadCasesFromDirectory(dirPath: string): Promise<void> {
     try {
-      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      const entries = await readdir(dirPath, { withFileTypes: true });
 
       for (const entry of entries) {
-        const fullPath = path.join(dirPath, entry.name);
+        const fullPath = join(dirPath, entry.name);
 
         if (entry.isDirectory()) {
           await this.loadCasesFromDirectory(fullPath);
@@ -44,7 +44,7 @@ export class CaseLoader {
 
   private async loadCase(filePath: string): Promise<void> {
     try {
-      const fileContent = await fs.readFile(filePath, 'utf-8');
+      const fileContent = await readFile(filePath, 'utf-8');
       const { data: frontmatter, content } = matter(fileContent);
 
       const validatedFrontmatter = CaseFrontmatterSchema.parse(frontmatter);
@@ -74,7 +74,7 @@ export class CaseLoader {
   }
 
   private getCategoryFromPath(filePath: string): 'mobile' | 'web' | 'backend' | 'tools' | 'integrations' {
-    const pathParts = filePath.split(path.sep);
+    const pathParts = filePath.split(sep);
     const casesIndex = pathParts.findIndex(part => part === 'cases');
 
     if (casesIndex !== -1 && casesIndex < pathParts.length - 1) {

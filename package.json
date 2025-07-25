@@ -1,0 +1,56 @@
+{
+  "name": "@withogulcandev/case7",
+  "version": "1.0.0",
+  "description": "MCP server for product development cases",
+  "main": "dist/server.js",
+  "type": "module",
+  "bin": {
+    "case7": "dist/server.js"
+  },
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx --watch src/server.ts",
+    "start": "node dist/server.js",
+    "index-cases": "tsx scripts/index-cases.ts",
+    "validate-cases": "tsx scripts/validate-cases.ts",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write src/**/*.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/withogulcandev/case7.git"
+  },
+  "keywords": [
+    "mcp",
+    "cases",
+    "development",
+    "products"
+  ],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/withogulcandev/case7/issues"
+  },
+  "homepage": "https://github.com/withogulcandev/case7#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "@upstash/vector": "^1.2.2",
+    "dotenv": "^17.2.1",
+    "gray-matter": "^4.0.3",
+    "openai": "^5.10.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "@typescript-eslint/eslint-plugin": "^8.38.0",
+    "@typescript-eslint/parser": "^8.38.0",
+    "eslint": "^9.31.0",
+    "nodemon": "^3.1.10",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}

@@ -193,6 +193,13 @@ class Case7HttpServer {
     });
 
     this.app.post('/oauth/token', (req, res) => {
+      if (!req.body) {
+        return res.status(400).json({ 
+          error: 'invalid_request', 
+          error_description: 'Request body is required' 
+        });
+      }
+
       const { grant_type, client_id, client_secret, code, code_verifier, redirect_uri } = req.body;
       
       if (grant_type === 'authorization_code') {

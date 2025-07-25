@@ -96,11 +96,12 @@ class Case7HttpServer {
   }
 
   private setupRoutes(): void {
-    // MCP endpoint for Streamable HTTP transport
+    // MCP endpoint for Streamable HTTP transport (Context7 style - no auth)
     this.app.post('/mcp', async (req, res) => {
       try {
         const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID()
+          sessionIdGenerator: () => randomUUID(),
+          requireClientRegistration: false // Context7 strategy: no client registration
         });
 
         await transport.handleRequest(req, res, this.server);

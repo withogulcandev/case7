@@ -270,7 +270,7 @@ class Case7HttpServer {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const server = new Case7HttpServer();
-  const port = parseInt(process.env.PORT || '3000');
+  const port = parseInt(process.env.PORT || '8080');
 
   server.start(port).catch((error) => {
     logger.error('Failed to start HTTP server:', error);

@@ -97,27 +97,15 @@ class Case7HttpServer {
 
   private setupRoutes(): void {
     // MCP endpoint for Streamable HTTP transport
-    this.app.post('/mcp', (req, res, next) => {
-      // Client registration check via headers
-      const clientId = req.headers['x-client-id'] as string;
-      const sessionId = req.headers['mcp-session-id'] as string;
-      
-      // Allow all clients but log registration attempts
-      if (clientId) {
-        logger.info(`Client attempting connection: ${clientId}`);
-      }
-      
-      next();
-    }, async (req, res) => {
+    this.app.post('/mcp', async (req, res) => {
       try {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sessionId: string) => {
-            logger.info(`Client registered with session: ${sessionId}`);
-            // Client registration logic can be added here
+            logger.info(`Session initialized: ${sessionId}`);
           },
           onsessionclosed: (sessionId: string) => {
-            logger.info(`Client session closed: ${sessionId}`);
+            logger.info(`Session closed: ${sessionId}`);
           }
         });
 
@@ -126,24 +114,6 @@ class Case7HttpServer {
         logger.error('Error handling MCP request:', error);
         res.status(500).json({ error: 'Internal server error' });
       }
-    });
-
-    // Client registration endpoint
-    this.app.post('/register', (req, res) => {
-      const { client_id, client_name, redirect_uri } = req.body;
-      
-      logger.info(`Client registration attempt: ${client_id || 'anonymous'}`);
-      
-      // For now, accept all registrations
-      res.json({
-        client_id: client_id || randomUUID(),
-        client_secret: randomUUID(),
-        registration_access_token: randomUUID(),
-        registration_client_uri: `${req.protocol}://${req.get('host')}/client/${client_id}`,
-        client_id_issued_at: Math.floor(Date.now() / 1000),
-        client_secret_expires_at: 0,
-        redirect_uris: redirect_uri ? [redirect_uri] : []
-      });
     });
 
     // Serve well-known files statically
@@ -166,7 +136,6 @@ class Case7HttpServer {
         transport: 'streamable-http',
         endpoints: {
           mcp: '/mcp',
-          register: '/register',
           health: '/health',
           info: '/info'
         },

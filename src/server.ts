@@ -246,36 +246,16 @@ class Case7HttpServer {
     }
   }
 
-  async start(port: number = 3000): Promise<void> {
+  async start(port = 8080) {
     await this.initialize();
-
-    this.app.listen(port, '127.0.0.1', () => {
-      logger.info(`case7 HTTP MCP server started on http://127.0.0.1:${port}`);
-      logger.info(`MCP endpoint: http://127.0.0.1:${port}/mcp`);
-      logger.info(`Health check: http://127.0.0.1:${port}/health`);
-    });
-
-    // Cleanup on shutdown
-    process.on('SIGINT', () => {
-      logger.info('Received SIGINT, shutting down HTTP server gracefully...');
-      process.exit(0);
-    });
-
-    process.on('SIGTERM', () => {
-      logger.info('Received SIGTERM, shutting down HTTP server gracefully...');
-      process.exit(0);
+    
+    this.app.listen(port, '0.0.0.0', () => {
+      console.log(`Server running on http://0.0.0.0:${port}`);
     });
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const server = new Case7HttpServer();
-  const port = parseInt(process.env.PORT || '8080');
-
-  server.start(port).catch((error) => {
-    logger.error('Failed to start HTTP server:', error);
-    process.exit(1);
-  });
-}
+// Start server
+new Case7HttpServer().start(Number(process.env.PORT) || 8080);
 
 export { Case7HttpServer };

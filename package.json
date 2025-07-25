@@ -37,10 +37,15 @@
   "homepage": "https://github.com/withogulcandev/case7#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
     "@upstash/vector": "^1.2.2",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.1",
+    "express": "^5.1.0",
     "gray-matter": "^4.0.3",
     "openai": "^5.10.2",
+    "raw-body": "^3.0.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

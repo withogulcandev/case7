@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 
 import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { CaseLoader } from './services/case-loader.js';
 import { VectorService } from './services/vector-service.js';
@@ -10,16 +13,18 @@ import { SearchService } from './services/search-service.js';
 import { SearchCasesSchema, GetCaseSchema } from './types/case.js';
 import { logger } from './utils/logger.js';
 
-class Case7Server {
+class Case7HttpServer {
+  private app: express.Application;
   private server: Server;
   private caseLoader: CaseLoader;
   private vectorService: VectorService;
   private searchService: SearchService;
 
   constructor() {
+    this.app = express();
     this.server = new Server(
       {
-        name: 'case7',
+        name: 'case7-http',
         version: '1.0.0'
       },
       {
@@ -33,10 +38,21 @@ class Case7Server {
     this.vectorService = new VectorService();
     this.searchService = new SearchService(this.caseLoader, this.vectorService);
 
-    this.setupHandlers();
+    this.setupMiddleware();
+    this.setupMcpHandlers();
+    this.setupRoutes();
   }
 
-  private setupHandlers(): void {
+  private setupMiddleware(): void {
+    this.app.use(cors({
+      origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+      credentials: true
+    }));
+    this.app.use(express.json());
+    this.app.use(express.raw({ type: 'application/json' }));
+  }
+
+  private setupMcpHandlers(): void {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
@@ -76,6 +92,49 @@ class Case7Server {
           isError: true
         };
       }
+    });
+  }
+
+  private setupRoutes(): void {
+    // MCP endpoint for Streamable HTTP transport
+    this.app.post('/mcp', async (req, res) => {
+      try {
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID()
+        });
+
+        await transport.handleRequest(req, res, this.server);
+      } catch (error) {
+        logger.error('Error handling MCP request:', error);
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    });
+
+    // Health check endpoint
+    this.app.get('/health', (req, res) => {
+      res.json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        transport: 'streamable-http'
+      });
+    });
+
+    // Info endpoint
+    this.app.get('/info', (req, res) => {
+      res.json({
+        name: 'case7-http',
+        version: '1.0.0',
+        transport: 'streamable-http',
+        endpoints: {
+          mcp: '/mcp',
+          health: '/health',
+          info: '/info'
+        },
+        tools: [
+          { name: 'search-cases', description: 'Search for development cases' },
+          { name: 'get-case', description: 'Get specific case by ID' }
+        ]
+      });
     });
   }
 
@@ -178,44 +237,45 @@ class Case7Server {
 
   async initialize(): Promise<void> {
     try {
-      logger.info('Initializing case7 server...');
-
+      logger.info('Initializing case7 HTTP server...');
       await this.caseLoader.loadAllCases();
-
-      logger.info('case7 server ready');
+      logger.info('case7 HTTP server ready');
     } catch (error) {
-      logger.error('Failed to initialize server:', error);
+      logger.error('Failed to initialize HTTP server:', error);
       throw error;
     }
   }
 
-  async start(): Promise<void> {
+  async start(port: number = 3000): Promise<void> {
     await this.initialize();
 
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
+    this.app.listen(port, '127.0.0.1', () => {
+      logger.info(`case7 HTTP MCP server started on http://127.0.0.1:${port}`);
+      logger.info(`MCP endpoint: http://127.0.0.1:${port}/mcp`);
+      logger.info(`Health check: http://127.0.0.1:${port}/health`);
+    });
 
-    logger.info('case7 MCP server started');
+    // Cleanup on shutdown
+    process.on('SIGINT', () => {
+      logger.info('Received SIGINT, shutting down HTTP server gracefully...');
+      process.exit(0);
+    });
+
+    process.on('SIGTERM', () => {
+      logger.info('Received SIGTERM, shutting down HTTP server gracefully...');
+      process.exit(0);
+    });
   }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const server = new Case7Server();
+  const server = new Case7HttpServer();
+  const port = parseInt(process.env.PORT || '3000');
 
-  process.on('SIGINT', () => {
-    logger.info('Received SIGINT, shutting down gracefully...');
-    process.exit(0);
-  });
-
-  process.on('SIGTERM', () => {
-    logger.info('Received SIGTERM, shutting down gracefully...');
-    process.exit(0);
-  });
-
-  server.start().catch((error) => {
-    logger.error('Failed to start server:', error);
+  server.start(port).catch((error) => {
+    logger.error('Failed to start HTTP server:', error);
     process.exit(1);
   });
 }
 
-export { Case7Server };
+export { Case7HttpServer };
